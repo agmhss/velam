@@ -138,22 +138,60 @@ function generateAutoTimetable() {
     
     const fnPeriodLabels = teachingPeriods.slice(0, 4).map(p => p.label);
     const anPeriodLabels = teachingPeriods.slice(4, 8).map(p => p.label);
+// --- CORE TIMETABLE GENERATOR (With Combined Class Logic & Session Balancing) ---
+function generateAutoTimetable() {
+    generatedWeeklyTimetable = []; 
+    let teacherAvail = {};
+    let classAvail = {};
+    let dailySubjectCount = {}; 
+    let teacherSessionCount = {}; 
+
+    if (!SCHOOL_CONFIG.assignments || SCHOOL_CONFIG.assignments.length === 0) return;
+    const teachingPeriods = SCHOOL_CONFIG.regularTimings.filter(p => p.type === 'class');
+    const firstPeriod = teachingPeriods[0];
+    
+    const fnPeriodLabels = teachingPeriods.slice(0, 4).map(p => p.label);
+    const anPeriodLabels = teachingPeriods.slice(4, 8).map(p => p.label);
+
+    // =========================================================
+    // 🌟 NEW HELPER: Combined Class Splitter (Handles & and ,)
+    // உ.ம்: "12-C&D" என்பதை ["12-C", "12-D"] என்று பிரிக்கும்
+    // =========================================================
+    function getIndividualClasses(classNameStr) {
+        let parts = classNameStr.split('-');
+        if (parts.length < 2) return [classNameStr];
+        let grade = parts[0];
+        // & அல்லது , இரண்டையும் வைத்து செக்ஷன்களைப் பிரிக்கும்
+        let sections = parts[1].split(/[&,]/); 
+        return sections.map(sec => `${grade}-${sec.trim()}`);
+    }
 
     // Phase 1: Class Teachers Locked to Period 1
     SCHOOL_CONFIG.assignments.forEach(req => {
         req.assignedCount = 0; 
         if (req.isClassTeacher && firstPeriod) {
+            let indClasses = getIndividualClasses(req.className);
+
             for (let day of daysOfWeek) {
                 let timeKey = `${day}-${firstPeriod.label}`;
-                if (!teacherAvail[req.teacherName]?.[timeKey] && !classAvail[req.className]?.[timeKey]) {
+                
+                // செக்ஷன்களில் ஏதேனும் ஒன்று பிஸியாக இருந்தாலும் அந்த நேரம் பிஸிதான்
+                let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
+
+                if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
                     generatedWeeklyTimetable.push({
                         day: day, period: firstPeriod.label, time: `${firstPeriod.start} - ${firstPeriod.end}`,
                         className: req.className, subjectName: req.subjectName, teacherName: `⭐ ${req.teacherName}`
                     });
+                    
                     if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
                     teacherAvail[req.teacherName][timeKey] = true;
-                    if (!classAvail[req.className]) classAvail[req.className] = {};
-                    classAvail[req.className][timeKey] = true;
+                    
+                    // அனைத்து தனித்தனி செக்ஷன்களையும் (12-C, 12-D) பிளாக் செய்தல்
+                    indClasses.forEach(cls => {
+                        if (!classAvail[cls]) classAvail[cls] = {};
+                        classAvail[cls][timeKey] = true;
+                    });
                     
                     if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
                     if (!teacherSessionCount[req.teacherName][day]) teacherSessionCount[req.teacherName][day] = { FN: 0, AN: 0 };
@@ -168,6 +206,8 @@ function generateAutoTimetable() {
     // Phase 2: Distribute Remaining Periods
     SCHOOL_CONFIG.assignments.forEach(req => {
         let remainingPeriods = req.periodsPerWeek - req.assignedCount;
+        let indClasses = getIndividualClasses(req.className);
+
         for (let i = 0; i < remainingPeriods; i++) {
             let placed = false;
             let preferredDayIndex = (i + req.assignedCount) % 5; 
@@ -181,17 +221,15 @@ function generateAutoTimetable() {
                     for (let period of SCHOOL_CONFIG.regularTimings) {
                         if (period.type === 'break' || period.type === 'fixed') continue; 
                         
-                        // ==============================================================
-                        // 🌟 NEW: 1st Period STRICT LOCK LOGIC
-                        // Class Teacher அல்லாத எவருக்கும் முதல் பீரியட் கிடைக்காது!
-                        // ==============================================================
-                        if (!req.isClassTeacher && period.label === firstPeriod.label) {
-                            continue; // முதல் பீரியடைத் தவிர்த்துவிட்டு அடுத்த பீரியடிற்குச் சென்றுவிடும்
-                        }
+                        // 1st Period STRICT LOCK (For Non-Class Teachers)
+                        if (!req.isClassTeacher && period.label === firstPeriod.label) continue; 
 
                         let timeKey = `${checkDay}-${period.label}`;
+                        let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
                         
-                        if (!teacherAvail[req.teacherName]?.[timeKey] && !classAvail[req.className]?.[timeKey]) {
+                        if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
+                            
+                            // ஒரு நாளைக்கு 2 பீரியட்களுக்கு மேல் ஒரு பாடத்தை எடுக்கக்கூடாது
                             let countToday = dailySubjectCount[req.className]?.[checkDay]?.[req.subjectName] || 0;
                             if (countToday >= 2) continue; 
                             
@@ -200,9 +238,9 @@ function generateAutoTimetable() {
                             
                             if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
                             if (!teacherSessionCount[req.teacherName][checkDay]) teacherSessionCount[req.teacherName][checkDay] = { FN: 0, AN: 0 };
-                            
                             let counts = teacherSessionCount[req.teacherName][checkDay];
                             
+                            // Smart Session Balance
                             if (strictMode) {
                                 if (isFN && counts.FN >= 3) continue; 
                                 if (isAN && counts.AN >= 3) continue; 
@@ -215,8 +253,13 @@ function generateAutoTimetable() {
                             
                             if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
                             teacherAvail[req.teacherName][timeKey] = true;
-                            if (!classAvail[req.className]) classAvail[req.className] = {};
-                            classAvail[req.className][timeKey] = true;
+                            
+                            // அனைத்து தனித்தனி செக்ஷன்களையும் (12-C, 12-D) பிளாக் செய்தல்
+                            indClasses.forEach(cls => {
+                                if (!classAvail[cls]) classAvail[cls] = {};
+                                classAvail[cls][timeKey] = true;
+                            });
+
                             if (!dailySubjectCount[req.className]) dailySubjectCount[req.className] = {};
                             if (!dailySubjectCount[req.className][checkDay]) dailySubjectCount[req.className][checkDay] = {};
                             dailySubjectCount[req.className][checkDay][req.subjectName] = countToday + 1;
