@@ -1,6 +1,6 @@
 /**
  * app.js - Advanced Timetable, Exam & Substitution Engine
- * Features: Master Config, Level Segregation, Smart Session Balancing, 1-Duty-Per-Day Exam Logic
+ * Features: Master Config, Level Segregation, Smart Session Balancing, 1-Duty-Per-Day, Perfect PDF Pagination
  */
 
 // ========================================================================
@@ -11,6 +11,7 @@ const APP_CONFIG = {
     shortName: "GHSS VELAMURITHANPETTAI",                                           
     scriptUrl: "https://script.google.com/macros/s/AKfycbwWlI-5iHo-lXoIeaSeHLs-jeI5sFxviEBSsJ3PS4AQJEN8ReoCG9xwpYKGJvYcMDPh/exec" 
 };
+
 const SCRIPT_URL = APP_CONFIG.scriptUrl;
 
 // --- Global Trackers ---
@@ -22,7 +23,7 @@ window.subDutyTracker = window.subDutyTracker || {};
 window.teacherWorkload = {}; 
 window.teacherLevels = {}; 
 window.teacherMaxGrade = {};
-window.dailyExamTracker = {}; // NEW: ஒரு நாளுக்கு ஒரு டியூட்டி என்பதை உறுதி செய்யும் நினைவகம்
+window.dailyExamTracker = {}; 
 
 function updateStatus(msg) {
     const indicator = document.getElementById('statusIndicator');
@@ -275,7 +276,7 @@ function renderRegularTimetable() {
     updateStatus(`Showing Grid for: ${filterVal}`);
 }
 
-// --- RENDER 2: EXAM SCHEDULE (With One-Duty-Per-Day Logic) ---
+// --- RENDER 2: EXAM SCHEDULE ---
 function renderExamSchedule() {
     const pattern = document.getElementById('patternSelect').value;
     const activeGrades = SCHOOL_CONFIG.examPatterns[pattern][currentSession];
@@ -362,7 +363,7 @@ function renderExamSchedule() {
         tempExamTracker[dutyTeacher] = (tempExamTracker[dutyTeacher] || 0) + 1;
         let teacherLoad = window.teacherWorkload[dutyTeacher] || 0;
 
-      html += `
+        html += `
             <div class="p-5 border border-gray-200 rounded-xl bg-white shadow-sm hover:border-blue-400 transition-all relative overflow-hidden">
                 <div class="absolute top-0 left-0 w-full h-1 ${isJunior ? 'bg-green-400' : 'bg-blue-500'}"></div>
                 <div class="flex justify-between items-start mb-4 mt-1">
@@ -392,7 +393,7 @@ function renderExamSchedule() {
     updateStatus("Exam Schedule Loaded (Strict 1-Duty-Per-Day Applied)");
 }
 
-// --- RENDER 3: SUBSTITUTION MANAGER (With Level Matching) ---
+// --- RENDER 3: SUBSTITUTION MANAGER ---
 function renderSubstituteSchedule() {
     const mainGrid = document.getElementById('mainGrid');
     const day = document.getElementById('subDay').value;
@@ -536,7 +537,7 @@ window.syncFromCloud = async function() {
                 let teacherName = String(row[0] || '').trim();
                 if (!teacherName) return; 
 
-                // --- BLOCK 1: முதல் வகுப்பு ஒதுக்கீடு (Columns B to F) ---
+                // --- BLOCK 1: முதல் வகுப்பு ஒதுக்கீடு ---
                 let sub1 = String(row[1] || '').trim();
                 let cls1 = String(row[2] || '').trim();
                 let sec1 = String(row[3] || '').trim();
@@ -627,7 +628,7 @@ window.saveDutiesToCloud = async function() {
     }
 };
 
-// --- EXPORT PDF (With Subject Names in Visiting Cards) ---
+// --- EXPORT PDF (With Master Visiting Card Generator & Layout Fixes) ---
 window.exportPDF = function() {
     const { jsPDF } = window.jspdf;
     const mode = document.getElementById('opMode').value;
@@ -656,7 +657,7 @@ window.exportPDF = function() {
         const filterVal = document.getElementById('viewFilter')?.value || '';
 
         // ==============================================================
-        // 🌟 VISITING CARD GENERATOR (All Teachers)
+        // 🌟 VISITING CARD GENERATOR (All Teachers - Perfect Fit)
         // ==============================================================
         if (viewType === 'all') {
             if (generatedWeeklyTimetable.length === 0) {
@@ -667,11 +668,13 @@ window.exportPDF = function() {
             const doc = new jsPDF('p', 'mm', 'a4'); 
             let allTeachers = [...new Set(SCHOOL_CONFIG.assignments.map(a => a.teacherName.replace('⭐ ', '')))].sort();
             
+            // 🌟 Card Layout Settings (Perfectly Centered for A4 to avoid page break bug)
             const cW = 90; 
-            const cH = 54; 
-            const marginX = 10; 
-            const marginY = 10; 
-            const gapY = 3; 
+            const cH = 52; // 🌟 Reduced height to safely fit 5 rows without bleeding
+            const marginX = 12; // Centered
+            const marginY = 12; // Centered
+            const gapX = 6;
+            const gapY = 4; 
             
             let cardsOnPage = 0;
             const teachingPeriods = SCHOOL_CONFIG.regularTimings.filter(p => p.type === 'class');
@@ -685,7 +688,7 @@ window.exportPDF = function() {
                 
                 let col = cardsOnPage % 2;
                 let row = Math.floor(cardsOnPage / 2);
-                let x = marginX + col * (cW + 10); 
+                let x = marginX + col * (cW + gapX); 
                 let y = marginY + row * (cH + gapY);
 
                 // 1. Draw Card Border
@@ -724,8 +727,9 @@ window.exportPDF = function() {
                     head: head, 
                     body: body,
                     startY: y + 7, 
-                    margin: { left: x + 2 }, 
+                    margin: { left: x + 2, bottom: 0 }, // 🌟 Prevents auto-page break
                     tableWidth: cW - 4,
+                    pageBreak: 'avoid', // 🌟 Forces table to stay inside the card
                     theme: 'grid',
                     styles: { 
                         fontSize: 5.5,       
