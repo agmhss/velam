@@ -1,6 +1,6 @@
 /**
  * app.js - Advanced Timetable, Exam & Substitution Engine
- * Features: Master Config, Level Segregation, Smart Session Balancing, 1st Period Class Teacher Lock
+ * Features: Master Config, Smart Session Balancing, Combined Class Splitter (&/,)
  */
 
 // ========================================================================
@@ -30,7 +30,9 @@ function updateStatus(msg) {
     if (indicator) indicator.innerText = msg;
 }
 
-// --- HELPERS: LEVEL CLASSIFICATION ---
+// =========================================================
+// 🌟 GLOBAL HELPERS
+// =========================================================
 function getGradeValue(clsStr) {
     let match = String(clsStr).toUpperCase().match(/^(\d+|LKG|UKG)/);
     if (!match) return -1;
@@ -43,6 +45,15 @@ function getTeacherCategory(gradeVal) {
     if (gradeVal <= 5) return 'Primary';
     if (gradeVal <= 10) return 'High School';
     return 'Hr. Secondary';
+}
+
+// 🌟 Combined Class Splitter (உ.ம்: "11-A&B&B2" -> ["11-A", "11-B", "11-B2"])
+function getIndividualClasses(classNameStr) {
+    let parts = String(classNameStr).split('-');
+    if (parts.length < 2) return [String(classNameStr).trim()];
+    let grade = parts[0].trim();
+    let sections = parts[1].split(/[&,]/); 
+    return sections.map(sec => `${grade}-${sec.trim()}`);
 }
 
 // --- UI EVENT LISTENERS & DYNAMIC UPDATES ---
@@ -84,7 +95,10 @@ document.addEventListener('DOMContentLoaded', () => {
             let options = new Set();
             if (e.target.value === 'class') {
                 viewFilter.classList.remove('hidden');
-                generatedWeeklyTimetable.forEach(slot => options.add(slot.className));
+                // 🌟 Dropdown-ல் தனித்தனி செக்ஷன்களையும் காட்டுவதற்கான லாஜிக்
+                generatedWeeklyTimetable.forEach(slot => {
+                    getIndividualClasses(slot.className).forEach(c => options.add(c));
+                });
             } else if (e.target.value === 'teacher') {
                 viewFilter.classList.remove('hidden');
                 generatedWeeklyTimetable.forEach(slot => options.add(slot.teacherName.replace('⭐ ', '')));
@@ -124,7 +138,7 @@ window.generateGrid = function() {
     else if (mode === 'substitution') renderSubstituteSchedule();
 };
 
-// --- CORE TIMETABLE GENERATOR (With Smart Session Balancing & 1st Period Lock) ---
+// --- CORE TIMETABLE GENERATOR (Combined Classes + Smart Spread + 1st Period Lock) ---
 function generateAutoTimetable() {
     generatedWeeklyTimetable = []; 
     let teacherAvail = {};
@@ -138,33 +152,6 @@ function generateAutoTimetable() {
     
     const fnPeriodLabels = teachingPeriods.slice(0, 4).map(p => p.label);
     const anPeriodLabels = teachingPeriods.slice(4, 8).map(p => p.label);
-// --- CORE TIMETABLE GENERATOR (With Combined Class Logic & Session Balancing) ---
-function generateAutoTimetable() {
-    generatedWeeklyTimetable = []; 
-    let teacherAvail = {};
-    let classAvail = {};
-    let dailySubjectCount = {}; 
-    let teacherSessionCount = {}; 
-
-    if (!SCHOOL_CONFIG.assignments || SCHOOL_CONFIG.assignments.length === 0) return;
-    const teachingPeriods = SCHOOL_CONFIG.regularTimings.filter(p => p.type === 'class');
-    const firstPeriod = teachingPeriods[0];
-    
-    const fnPeriodLabels = teachingPeriods.slice(0, 4).map(p => p.label);
-    const anPeriodLabels = teachingPeriods.slice(4, 8).map(p => p.label);
-
-    // =========================================================
-    // 🌟 NEW HELPER: Combined Class Splitter (Handles & and ,)
-    // உ.ம்: "12-C&D" என்பதை ["12-C", "12-D"] என்று பிரிக்கும்
-    // =========================================================
-    function getIndividualClasses(classNameStr) {
-        let parts = classNameStr.split('-');
-        if (parts.length < 2) return [classNameStr];
-        let grade = parts[0];
-        // & அல்லது , இரண்டையும் வைத்து செக்ஷன்களைப் பிரிக்கும்
-        let sections = parts[1].split(/[&,]/); 
-        return sections.map(sec => `${grade}-${sec.trim()}`);
-    }
 
     // Phase 1: Class Teachers Locked to Period 1
     SCHOOL_CONFIG.assignments.forEach(req => {
@@ -174,8 +161,6 @@ function generateAutoTimetable() {
 
             for (let day of daysOfWeek) {
                 let timeKey = `${day}-${firstPeriod.label}`;
-                
-                // செக்ஷன்களில் ஏதேனும் ஒன்று பிஸியாக இருந்தாலும் அந்த நேரம் பிஸிதான்
                 let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
 
                 if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
@@ -187,7 +172,6 @@ function generateAutoTimetable() {
                     if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
                     teacherAvail[req.teacherName][timeKey] = true;
                     
-                    // அனைத்து தனித்தனி செக்ஷன்களையும் (12-C, 12-D) பிளாக் செய்தல்
                     indClasses.forEach(cls => {
                         if (!classAvail[cls]) classAvail[cls] = {};
                         classAvail[cls][timeKey] = true;
@@ -220,8 +204,6 @@ function generateAutoTimetable() {
                     
                     for (let period of SCHOOL_CONFIG.regularTimings) {
                         if (period.type === 'break' || period.type === 'fixed') continue; 
-                        
-                        // 1st Period STRICT LOCK (For Non-Class Teachers)
                         if (!req.isClassTeacher && period.label === firstPeriod.label) continue; 
 
                         let timeKey = `${checkDay}-${period.label}`;
@@ -229,7 +211,6 @@ function generateAutoTimetable() {
                         
                         if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
                             
-                            // ஒரு நாளைக்கு 2 பீரியட்களுக்கு மேல் ஒரு பாடத்தை எடுக்கக்கூடாது
                             let countToday = dailySubjectCount[req.className]?.[checkDay]?.[req.subjectName] || 0;
                             if (countToday >= 2) continue; 
                             
@@ -240,7 +221,6 @@ function generateAutoTimetable() {
                             if (!teacherSessionCount[req.teacherName][checkDay]) teacherSessionCount[req.teacherName][checkDay] = { FN: 0, AN: 0 };
                             let counts = teacherSessionCount[req.teacherName][checkDay];
                             
-                            // Smart Session Balance
                             if (strictMode) {
                                 if (isFN && counts.FN >= 3) continue; 
                                 if (isAN && counts.AN >= 3) continue; 
@@ -254,7 +234,6 @@ function generateAutoTimetable() {
                             if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
                             teacherAvail[req.teacherName][timeKey] = true;
                             
-                            // அனைத்து தனித்தனி செக்ஷன்களையும் (12-C, 12-D) பிளாக் செய்தல்
                             indClasses.forEach(cls => {
                                 if (!classAvail[cls]) classAvail[cls] = {};
                                 classAvail[cls][timeKey] = true;
@@ -307,8 +286,13 @@ function renderRegularTimetable() {
     html += `</tr></thead><tbody>`;
 
     let displayData = generatedWeeklyTimetable;
-    if (viewType === 'class') displayData = generatedWeeklyTimetable.filter(d => d.className === filterVal);
-    else if (viewType === 'teacher') displayData = generatedWeeklyTimetable.filter(d => d.teacherName.replace('⭐ ', '') === filterVal);
+    
+    // 🌟 Combined Classes Support in UI Filter
+    if (viewType === 'class') {
+        displayData = generatedWeeklyTimetable.filter(d => getIndividualClasses(d.className).includes(filterVal));
+    } else if (viewType === 'teacher') {
+        displayData = generatedWeeklyTimetable.filter(d => d.teacherName.replace('⭐ ', '') === filterVal);
+    }
 
     daysOfWeek.forEach(day => {
         html += `<tr><td class="p-3 border border-gray-200 font-bold text-gray-700 bg-gray-50 text-left">${day}</td>`;
@@ -679,7 +663,7 @@ window.saveDutiesToCloud = async function() {
     }
 };
 
-// --- EXPORT PDF (With Layout Fixes) ---
+// --- EXPORT PDF ---
 window.exportPDF = function() {
     const { jsPDF } = window.jspdf;
     const mode = document.getElementById('opMode').value;
