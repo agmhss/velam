@@ -1,6 +1,6 @@
 /**
  * app.js - Advanced Timetable, Exam & Substitution Engine
- * Features: Master Config, Level Segregation, Smart Session Balancing, 1-Duty-Per-Day, Perfect PDF Pagination
+ * Features: Master Config, Level Segregation, Smart Session Balancing, 1st Period Class Teacher Lock
  */
 
 // ========================================================================
@@ -124,7 +124,7 @@ window.generateGrid = function() {
     else if (mode === 'substitution') renderSubstituteSchedule();
 };
 
-// --- CORE TIMETABLE GENERATOR (With Smart Session Balancing) ---
+// --- CORE TIMETABLE GENERATOR (With Smart Session Balancing & 1st Period Lock) ---
 function generateAutoTimetable() {
     generatedWeeklyTimetable = []; 
     let teacherAvail = {};
@@ -139,6 +139,7 @@ function generateAutoTimetable() {
     const fnPeriodLabels = teachingPeriods.slice(0, 4).map(p => p.label);
     const anPeriodLabels = teachingPeriods.slice(4, 8).map(p => p.label);
 
+    // Phase 1: Class Teachers Locked to Period 1
     SCHOOL_CONFIG.assignments.forEach(req => {
         req.assignedCount = 0; 
         if (req.isClassTeacher && firstPeriod) {
@@ -164,6 +165,7 @@ function generateAutoTimetable() {
         }
     });
 
+    // Phase 2: Distribute Remaining Periods
     SCHOOL_CONFIG.assignments.forEach(req => {
         let remainingPeriods = req.periodsPerWeek - req.assignedCount;
         for (let i = 0; i < remainingPeriods; i++) {
@@ -178,6 +180,15 @@ function generateAutoTimetable() {
                     
                     for (let period of SCHOOL_CONFIG.regularTimings) {
                         if (period.type === 'break' || period.type === 'fixed') continue; 
+                        
+                        // ==============================================================
+                        // 🌟 NEW: 1st Period STRICT LOCK LOGIC
+                        // Class Teacher அல்லாத எவருக்கும் முதல் பீரியட் கிடைக்காது!
+                        // ==============================================================
+                        if (!req.isClassTeacher && period.label === firstPeriod.label) {
+                            continue; // முதல் பீரியடைத் தவிர்த்துவிட்டு அடுத்த பீரியடிற்குச் சென்றுவிடும்
+                        }
+
                         let timeKey = `${checkDay}-${period.label}`;
                         
                         if (!teacherAvail[req.teacherName]?.[timeKey] && !classAvail[req.className]?.[timeKey]) {
@@ -513,7 +524,6 @@ function populateAbsentTeachersList() {
     ).join('');
 }
 
-// --- CLOUD SYNC & NEW DYNAMIC HORIZONTAL PARSING ---
 window.syncFromCloud = async function() {
     updateStatus("Downloading Sheets...");
     try {
@@ -537,7 +547,6 @@ window.syncFromCloud = async function() {
                 let teacherName = String(row[0] || '').trim();
                 if (!teacherName) return; 
 
-                // --- BLOCK 1: முதல் வகுப்பு ஒதுக்கீடு ---
                 let sub1 = String(row[1] || '').trim();
                 let cls1 = String(row[2] || '').trim();
                 let sec1 = String(row[3] || '').trim();
@@ -558,7 +567,6 @@ window.syncFromCloud = async function() {
                     window.teacherMaxGrade[teacherName] = Math.max((window.teacherMaxGrade[teacherName] || 0), gVal1);
                 }
 
-                // --- BLOCKS 2 to N: அடுத்தடுத்த வகுப்புகள் ---
                 for (let i = 6; i < row.length; i += 4) {
                     let subN = String(row[i] || '').trim();
                     let clsN = String(row[i+1] || '').trim();
@@ -628,7 +636,7 @@ window.saveDutiesToCloud = async function() {
     }
 };
 
-// --- EXPORT PDF (With Master Visiting Card Generator & Layout Fixes) ---
+// --- EXPORT PDF (With Layout Fixes) ---
 window.exportPDF = function() {
     const { jsPDF } = window.jspdf;
     const mode = document.getElementById('opMode').value;
@@ -656,9 +664,6 @@ window.exportPDF = function() {
         const viewType = document.getElementById('viewType')?.value || 'all';
         const filterVal = document.getElementById('viewFilter')?.value || '';
 
-        // ==============================================================
-        // 🌟 VISITING CARD GENERATOR (All Teachers - Perfect Fit)
-        // ==============================================================
         if (viewType === 'all') {
             if (generatedWeeklyTimetable.length === 0) {
                 alert("No data generated. Click Sync Data first!");
@@ -668,11 +673,10 @@ window.exportPDF = function() {
             const doc = new jsPDF('p', 'mm', 'a4'); 
             let allTeachers = [...new Set(SCHOOL_CONFIG.assignments.map(a => a.teacherName.replace('⭐ ', '')))].sort();
             
-            // 🌟 Card Layout Settings (Perfectly Centered for A4 to avoid page break bug)
             const cW = 90; 
-            const cH = 52; // 🌟 Reduced height to safely fit 5 rows without bleeding
-            const marginX = 12; // Centered
-            const marginY = 12; // Centered
+            const cH = 52; 
+            const marginX = 12; 
+            const marginY = 12; 
             const gapX = 6;
             const gapY = 4; 
             
@@ -691,19 +695,16 @@ window.exportPDF = function() {
                 let x = marginX + col * (cW + gapX); 
                 let y = marginY + row * (cH + gapY);
 
-                // 1. Draw Card Border
                 doc.setDrawColor(180, 180, 180); 
                 doc.setLineWidth(0.3);
                 doc.rect(x, y, cW, cH);
 
-                // 2. Teacher Name Header
                 doc.setFontSize(9); 
                 doc.setTextColor(0); 
                 doc.setFont("helvetica", "bold");
                 let displayName = teacher.length > 20 ? teacher.substring(0, 18) + "..." : teacher;
                 doc.text(`${APP_CONFIG.shortName} - ${displayName}`, x + 2, y + 5);
 
-                // 3. Build Miniature Table Data (With Subjects!)
                 let head = [['Day', ...teachingPeriods.map((_, i) => i + 1)]];
                 let body = [];
                 
@@ -722,14 +723,13 @@ window.exportPDF = function() {
                     body.push(rowData);
                 });
 
-                // 4. Print Miniature Table
                 doc.autoTable({
                     head: head, 
                     body: body,
                     startY: y + 7, 
-                    margin: { left: x + 2, bottom: 0 }, // 🌟 Prevents auto-page break
+                    margin: { left: x + 2, bottom: 0 }, 
                     tableWidth: cW - 4,
-                    pageBreak: 'avoid', // 🌟 Forces table to stay inside the card
+                    pageBreak: 'avoid', 
                     theme: 'grid',
                     styles: { 
                         fontSize: 5.5,       
@@ -750,9 +750,6 @@ window.exportPDF = function() {
             doc.save(`${APP_CONFIG.shortName}_All_Teacher_Cards.pdf`);
 
         } else {
-            // ==============================================================
-            // SINGLE TIMETABLE LOGIC (Landscape Mode)
-            // ==============================================================
             const doc = new jsPDF('l', 'mm', 'a4'); 
             doc.setFontSize(16);
             doc.setTextColor(30, 58, 138); 
