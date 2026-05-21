@@ -150,66 +150,70 @@ window.generateGrid = function() {
 // --- CORE TIMETABLE GENERATOR ---
 function generateAutoTimetable() {
     generatedWeeklyTimetable = []; 
-    let teacherAvail = {};
-    let classAvail = {};
-    let dailySubjectCount = {}; 
-    let teacherSessionCount = {}; 
+    let teacherAvail = {}; // ஆசிரியரின் கால அட்டவணை (Track: Teacher-Day-Period)
+    let classAvail = {};   // வகுப்புகளின் கால அட்டவணை (Track: Class-Day-Period)
 
     if (!SCHOOL_CONFIG.assignments || SCHOOL_CONFIG.assignments.length === 0) return;
 
-    SCHOOL_CONFIG.assignments.sort((a, b) => {
-        if (a.isClassTeacher !== b.isClassTeacher) return a.isClassTeacher ? -1 : 1;
-        let keyA = `${a.teacherName}-${a.className}-${a.subjectName}`;
-        let keyB = `${b.teacherName}-${b.className}-${b.subjectName}`;
-        return keyA.localeCompare(keyB);
-    });
+    // 🌟 Priority Allocation: 22 பீரியட் தேவைப்படும் SM போன்ற ஆசிரியர்களுக்கு முதல் முன்னுரிமை
+    SCHOOL_CONFIG.assignments.sort((a, b) => b.periodsPerWeek - a.periodsPerWeek);
 
     const teachingPeriods = SCHOOL_CONFIG.regularTimings.filter(p => p.type === 'class');
-    const firstPeriod = teachingPeriods[0];
-    
     const fnPeriodLabels = teachingPeriods.slice(0, 4).map(p => p.label);
-    const anPeriodLabels = teachingPeriods.slice(4, 8).map(p => p.label);
 
-    // Phase 1: Class Teachers Locked to Period 1
     SCHOOL_CONFIG.assignments.forEach(req => {
-        req.assignedCount = 0; 
-        if (req.isClassTeacher && firstPeriod) {
+        let indClasses = getIndividualClasses(req.className);
+        
+        // 🌟 ALLOCATION LOOP: ஆசிரியர் கேட்கும் மொத்த பீரியட்களையும் ஒதுக்கும் வரை விடாது
+        for (let i = 0; i < req.periodsPerWeek; i++) {
+            let placed = false;
             
-            let isFN = fnPeriodLabels.includes(firstPeriod.label);
-            let sessionType = isFN ? 'FN' : 'AN';
-            
-            // 🌟 Global Part-Time Checker
-            if (!isPartTimeTeacherAvailable(req.teacherName, sessionType)) return;
-            
-            let indClasses = getIndividualClasses(req.className);
+            // சீரான பரவல் (Distributed Allocation)
+            for (let d = 0; d < daysOfWeek.length; d++) {
+                let day = daysOfWeek[d];
+                
+                for (let period of teachingPeriods) {
+                    let isFN = fnPeriodLabels.includes(period.label);
+                    let sessionType = isFN ? 'FN' : 'AN';
 
-            for (let day of daysOfWeek) {
-                let timeKey = `${day}-${firstPeriod.label}`;
-                let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
+                    // 🌟 Part-Time Teachers Restriction
+                    if (!isPartTimeTeacherAvailable(req.teacherName, sessionType)) continue;
 
-                if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
-                    generatedWeeklyTimetable.push({
-                        day: day, period: firstPeriod.label, time: `${firstPeriod.start} - ${firstPeriod.end}`,
-                        className: req.className, subjectName: req.subjectName, teacherName: `⭐ ${req.teacherName}`
-                    });
+                    let timeKey = `${day}-${period.label}`;
                     
-                    if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
-                    teacherAvail[req.teacherName][timeKey] = true;
+                    // 🌟 CLASH DETECTION: ஆசிரியர் அல்லது வகுப்பு ஏற்கனவே பிஸியா?
+                    let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
+                    let isTeacherBusy = teacherAvail[req.teacherName]?.[timeKey];
                     
-                    indClasses.forEach(cls => {
-                        if (!classAvail[cls]) classAvail[cls] = {};
-                        classAvail[cls][timeKey] = true;
-                    });
-                    
-                    if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
-                    if (!teacherSessionCount[req.teacherName][day]) teacherSessionCount[req.teacherName][day] = { FN: 0, AN: 0 };
-                    if (isFN) teacherSessionCount[req.teacherName][day].FN++;
-                    
-                    req.assignedCount++;
+                    if (!isTeacherBusy && !isClassBusy) {
+                        // பீரியட் ஒதுக்குதல்
+                        generatedWeeklyTimetable.push({
+                            day: day, period: period.label, time: `${period.start} - ${period.end}`,
+                            className: req.className, subjectName: req.subjectName, teacherName: req.teacherName
+                        });
+                        
+                        // பதிவு செய்தல் (Lock)
+                        if(!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
+                        teacherAvail[req.teacherName][timeKey] = true;
+                        
+                        indClasses.forEach(cls => {
+                            if(!classAvail[cls]) classAvail[cls] = {};
+                            classAvail[cls][timeKey] = true;
+                        });
+                        
+                        placed = true;
+                        break; 
+                    }
                 }
+                if (placed) break; 
+            }
+            if (!placed) {
+                console.warn(`⚠️ ஒதுக்கீடு தோல்வி: ${req.teacherName} - ${req.className} - பாடவேளை ${i+1}`);
             }
         }
     });
+                            }
+
 
     // Phase 2: Distribute Remaining Periods
     SCHOOL_CONFIG.assignments.forEach(req => {
@@ -242,7 +246,7 @@ function generateAutoTimetable() {
                         
                         if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
                             let countToday = dailySubjectCount[req.className]?.[checkDay]?.[req.subjectName] || 0;
-                            if (countToday >= 6) continue; 
+                            if (countToday >= 4) continue; 
                             
                             if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
                             if (!teacherSessionCount[req.teacherName][checkDay]) teacherSessionCount[req.teacherName][checkDay] = { FN: 0, AN: 0 };
