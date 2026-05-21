@@ -11,7 +11,6 @@ const APP_CONFIG = {
     shortName: "GHSS VMPT",                                           
     scriptUrl: "https://script.google.com/macros/s/AKfycbyJfcbZpYU1gBylfCZrfzVoOs3Ru3TA32ic8_jyB10wYsObvEOBFXmnN5R8xL1InpP51A/exec" 
 };
-
 const SCRIPT_URL = APP_CONFIG.scriptUrl;
 
 // --- Global Trackers ---
