@@ -1,16 +1,15 @@
 /**
  * app.js - Advanced Timetable, Exam & Substitution Engine
- * Features: Absolute Determinism, Combined Class Splitter, Part-Time Designation Logic
- * Changes: Removed "Max 2 periods per day" limit as requested.
+ * Features: Absolute Determinism, Combined Class Splitter, Global Part-Time Tagging
  */
 
 // ========================================================================
-// ⚙️ MASTER CONFIGURATION
+// ⚙️ MASTER CONFIGURATION (Change only this block for other schools)
 // ========================================================================
 const APP_CONFIG = {
     fullName: "GHSS VELAMURITHANPETTAI", 
-    shortName: "GHSS VELAMURITHANPETTAI",                                           
-    scriptUrl: "https://script.google.com/macros/s/AKfycbwWlI-5iHo-lXoIeaSeHLs-jeI5sFxviEBSsJ3PS4AQJEN8ReoCG9xwpYKGJvYcMDPh/exec" 
+    shortName: "GHSS VMPT",                                           
+    scriptUrl: "https://script.google.com/macros/s/AKfycbyJfcbZpYU1gBylfCZrfzVoOs3Ru3TA32ic8_jyB10wYsObvEOBFXmnN5R8xL1InpP51A/exec" 
 };
 
 const SCRIPT_URL = APP_CONFIG.scriptUrl;
@@ -25,7 +24,7 @@ window.teacherWorkload = {};
 window.teacherLevels = {}; 
 window.teacherMaxGrade = {};
 window.dailyExamTracker = {}; 
-window.teacherPartTimeStatus = {}; 
+window.teacherPartTimeStatus = {}; // 🌟 NEW: ஆசிரியர்களின் நிரந்தர நேரக் கட்டுப்பாடு
 
 function updateStatus(msg) {
     const indicator = document.getElementById('statusIndicator');
@@ -57,6 +56,7 @@ function getIndividualClasses(classNameStr) {
     return sections.map(sec => `${grade}-${sec.trim()}`);
 }
 
+// 🌟 NEW: Global Part-Time Availability Checker
 function isPartTimeTeacherAvailable(teacherName, sessionType) {
     let tName = String(teacherName).replace('⭐ ', '').trim();
     let status = window.teacherPartTimeStatus[tName] || 'FULL';
@@ -153,12 +153,13 @@ function generateAutoTimetable() {
     generatedWeeklyTimetable = []; 
     let teacherAvail = {};
     let classAvail = {};
+    let dailySubjectCount = {}; 
     let teacherSessionCount = {}; 
 
     if (!SCHOOL_CONFIG.assignments || SCHOOL_CONFIG.assignments.length === 0) return;
 
-    // 🌟 Absolute Determinism: சீரான வரிசைப்படுத்துதல்
     SCHOOL_CONFIG.assignments.sort((a, b) => {
+        if (a.isClassTeacher !== b.isClassTeacher) return a.isClassTeacher ? -1 : 1;
         let keyA = `${a.teacherName}-${a.className}-${a.subjectName}`;
         let keyB = `${b.teacherName}-${b.className}-${b.subjectName}`;
         return keyA.localeCompare(keyB);
@@ -170,52 +171,115 @@ function generateAutoTimetable() {
     const fnPeriodLabels = teachingPeriods.slice(0, 4).map(p => p.label);
     const anPeriodLabels = teachingPeriods.slice(4, 8).map(p => p.label);
 
-    // Phase: Distribute All Periods
+    // Phase 1: Class Teachers Locked to Period 1
     SCHOOL_CONFIG.assignments.forEach(req => {
         req.assignedCount = 0; 
+        if (req.isClassTeacher && firstPeriod) {
+            
+            let isFN = fnPeriodLabels.includes(firstPeriod.label);
+            let sessionType = isFN ? 'FN' : 'AN';
+            
+            // 🌟 Global Part-Time Checker
+            if (!isPartTimeTeacherAvailable(req.teacherName, sessionType)) return;
+            
+            let indClasses = getIndividualClasses(req.className);
+
+            for (let day of daysOfWeek) {
+                let timeKey = `${day}-${firstPeriod.label}`;
+                let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
+
+                if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
+                    generatedWeeklyTimetable.push({
+                        day: day, period: firstPeriod.label, time: `${firstPeriod.start} - ${firstPeriod.end}`,
+                        className: req.className, subjectName: req.subjectName, teacherName: `⭐ ${req.teacherName}`
+                    });
+                    
+                    if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
+                    teacherAvail[req.teacherName][timeKey] = true;
+                    
+                    indClasses.forEach(cls => {
+                        if (!classAvail[cls]) classAvail[cls] = {};
+                        classAvail[cls][timeKey] = true;
+                    });
+                    
+                    if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
+                    if (!teacherSessionCount[req.teacherName][day]) teacherSessionCount[req.teacherName][day] = { FN: 0, AN: 0 };
+                    if (isFN) teacherSessionCount[req.teacherName][day].FN++;
+                    
+                    req.assignedCount++;
+                }
+            }
+        }
+    });
+
+    // Phase 2: Distribute Remaining Periods
+    SCHOOL_CONFIG.assignments.forEach(req => {
+        let remainingPeriods = req.periodsPerWeek - req.assignedCount;
         let indClasses = getIndividualClasses(req.className);
 
-        for (let i = 0; i < req.periodsPerWeek; i++) {
+        for (let i = 0; i < remainingPeriods; i++) {
             let placed = false;
-            let preferredDayIndex = i % 5; 
+            let preferredDayIndex = (i + req.assignedCount) % 5; 
+            let attemptLimits = [true, false]; 
             
-            for (let d = 0; d < 5; d++) {
-                let checkDayIndex = (preferredDayIndex + d) % 5;
-                let checkDay = daysOfWeek[checkDayIndex];
-                
-                for (let period of teachingPeriods) {
-                    // Class Teacher முதல் பீரியட் விதி
-                    if (!req.isClassTeacher && period.label === firstPeriod.label) continue; 
-
-                    let isFN = fnPeriodLabels.includes(period.label);
-                    let isAN = anPeriodLabels.includes(period.label);
-                    let sessionType = isFN ? 'FN' : 'AN';
-
-                    // Part-Time Block
-                    if (!isPartTimeTeacherAvailable(req.teacherName, sessionType)) continue; 
-
-                    let timeKey = `${checkDay}-${period.label}`;
-                    let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
+            for (let strictMode of attemptLimits) {
+                for (let d = 0; d < 5; d++) {
+                    let checkDayIndex = (preferredDayIndex + d) % 5;
+                    let checkDay = daysOfWeek[checkDayIndex];
                     
-                    if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
+                    for (let period of SCHOOL_CONFIG.regularTimings) {
+                        if (period.type === 'break' || period.type === 'fixed') continue; 
+                        if (!req.isClassTeacher && period.label === firstPeriod.label) continue; 
+
+                        let isFN = fnPeriodLabels.includes(period.label);
+                        let isAN = anPeriodLabels.includes(period.label);
+                        let sessionType = isFN ? 'FN' : 'AN';
+
+                        // 🌟 Global Part-Time Checker
+                        if (!isPartTimeTeacherAvailable(req.teacherName, sessionType)) continue; 
+
+                        let timeKey = `${checkDay}-${period.label}`;
+                        let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
                         
-                        generatedWeeklyTimetable.push({
-                            day: checkDay, period: period.label, time: `${period.start} - ${period.end}`,
-                            className: req.className, subjectName: req.subjectName, teacherName: req.teacherName
-                        });
-                        
-                        if(!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
-                        teacherAvail[req.teacherName][timeKey] = true;
-                        
-                        indClasses.forEach(cls => {
-                            if (!classAvail[cls]) classAvail[cls] = {};
-                            classAvail[cls][timeKey] = true;
-                        });
-                        
-                        req.assignedCount++;
-                        placed = true;
-                        break; 
+                        if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
+                            let countToday = dailySubjectCount[req.className]?.[checkDay]?.[req.subjectName] || 0;
+                            if (countToday >= 2) continue; 
+                            
+                            if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
+                            if (!teacherSessionCount[req.teacherName][checkDay]) teacherSessionCount[req.teacherName][checkDay] = { FN: 0, AN: 0 };
+                            let counts = teacherSessionCount[req.teacherName][checkDay];
+                            
+                            if (strictMode) {
+                                if (isFN && counts.FN >= 3) continue; 
+                                if (isAN && counts.AN >= 3) continue; 
+                            }
+                            
+                            generatedWeeklyTimetable.push({
+                                day: checkDay, period: period.label, time: `${period.start} - ${period.end}`,
+                                className: req.className, subjectName: req.subjectName, teacherName: req.teacherName
+                            });
+                            
+                            if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
+                            teacherAvail[req.teacherName][timeKey] = true;
+                            
+                            indClasses.forEach(cls => {
+                                if (!classAvail[cls]) classAvail[cls] = {};
+                                classAvail[cls][timeKey] = true;
+                            });
+
+                            if (!dailySubjectCount[req.className]) dailySubjectCount[req.className] = {};
+                            if (!dailySubjectCount[req.className][checkDay]) dailySubjectCount[req.className][checkDay] = {};
+                            dailySubjectCount[req.className][checkDay][req.subjectName] = countToday + 1;
+                            
+                            if (isFN) counts.FN++;
+                            if (isAN) counts.AN++;
+                            
+                            req.assignedCount++;
+                            placed = true;
+                            break; 
+                        }
                     }
+                    if (placed) break; 
                 }
                 if (placed) break; 
             }
@@ -275,8 +339,6 @@ function renderRegularTimetable() {
     mainGrid.innerHTML = html;
     updateStatus(`Showing Grid for: ${filterVal}`);
 }
-
-// ... (renderExamSchedule, renderSubstituteSchedule, syncFromCloud, saveDutiesToCloud, exportPDF ஆகியவை அதே கோப்பில் இருக்கட்டும்)
 
 // --- RENDER 2: EXAM SCHEDULE ---
 function renderExamSchedule() {
@@ -539,6 +601,8 @@ window.syncFromCloud = async function() {
         SCHOOL_CONFIG.assignments = [];
         window.teacherWorkload = {}; 
         window.teacherMaxGrade = {}; 
+        
+        let tempTeacherSubjects = {}; // 🌟 To check Part-Time Strings globally
 
         if (cloudData.assignments && cloudData.assignments.length > 1) {
             cloudData.assignments.slice(1).forEach(row => {
@@ -550,6 +614,9 @@ window.syncFromCloud = async function() {
                 let sec1 = String(row[3] || '').trim();
                 let per1 = parseInt(row[4]);
                 let isCT = String(row[5] || '').trim().toLowerCase() === 'yes';
+
+                if (!tempTeacherSubjects[teacherName]) tempTeacherSubjects[teacherName] = [];
+                if (sub1) tempTeacherSubjects[teacherName].push(sub1.toUpperCase());
 
                 if (cls1 && !isNaN(per1) && per1 > 0) {
                     SCHOOL_CONFIG.assignments.push({
@@ -573,10 +640,13 @@ window.syncFromCloud = async function() {
 
                     if (!clsN || clsN.toLowerCase() === 'total load') break; 
 
+                    let actualSubN = subN ? subN : sub1;
+                    if (actualSubN) tempTeacherSubjects[teacherName].push(actualSubN.toUpperCase());
+
                     if (!isNaN(perN) && perN > 0) {
                         SCHOOL_CONFIG.assignments.push({
                             teacherName: teacherName,
-                            subjectName: subN ? subN : sub1, 
+                            subjectName: actualSubN, 
                             className: clsN + "-" + secN,
                             periodsPerWeek: perN,
                             isClassTeacher: false 
@@ -589,9 +659,19 @@ window.syncFromCloud = async function() {
                 }
             });
 
+            // 🌟 Build Global Part Time Status & Category Levels
             window.teacherLevels = {};
+            window.teacherPartTimeStatus = {};
+            
             for (let t in window.teacherMaxGrade) {
                 window.teacherLevels[t] = getTeacherCategory(window.teacherMaxGrade[t]);
+                
+                let isMorn = tempTeacherSubjects[t]?.some(s => s.includes('PART TIME TEACHER MORNING'));
+                let isAft = tempTeacherSubjects[t]?.some(s => s.includes('PART TIME TEACHER AFTERNOON'));
+                
+                if (isMorn) window.teacherPartTimeStatus[t] = 'MORNING';
+                else if (isAft) window.teacherPartTimeStatus[t] = 'AFTERNOON';
+                else window.teacherPartTimeStatus[t] = 'FULL';
             }
             
             updateStatus("Generating Schedule...");
