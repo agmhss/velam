@@ -1,6 +1,6 @@
 /**
  * app.js - Advanced Timetable, Exam & Substitution Engine
- * Features: Master Config, Smart Session Balancing, Combined Class Splitter (&/,)
+ * Features: Absolute Determinism, Robust Combined Class Splitter, Perfect View Synchronization
  */
 
 // ========================================================================
@@ -8,8 +8,8 @@
 // ========================================================================
 const APP_CONFIG = {
     fullName: "GHSS VELAMURITHANPETTAI", 
-    shortName: "GHSS VELAMURITHANPETTAI",                                           
-    scriptUrl: "https://script.google.com/macros/s/AKfycbwWlI-5iHo-lXoIeaSeHLs-jeI5sFxviEBSsJ3PS4AQJEN8ReoCG9xwpYKGJvYcMDPh/exec" 
+    shortName: "GHSS VMPT",                                           
+    scriptUrl: "https://script.google.com/macros/s/AKfycbyJfcbZpYU1gBylfCZrfzVoOs3Ru3TA32ic8_jyB10wYsObvEOBFXmnN5R8xL1InpP51A/exec" 
 };
 
 const SCRIPT_URL = APP_CONFIG.scriptUrl;
@@ -47,7 +47,7 @@ function getTeacherCategory(gradeVal) {
     return 'Hr. Secondary';
 }
 
-// 🌟 Combined Class Splitter (உ.ம்: "11-A&B&B2" -> ["11-A", "11-B", "11-B2"])
+// 🌟 Robust Combined Class Splitter (Handles Both & and ,)
 function getIndividualClasses(classNameStr) {
     let parts = String(classNameStr).split('-');
     if (parts.length < 2) return [String(classNameStr).trim()];
@@ -95,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let options = new Set();
             if (e.target.value === 'class') {
                 viewFilter.classList.remove('hidden');
-                // 🌟 Dropdown-ல் தனித்தனி செக்ஷன்களையும் காட்டுவதற்கான லாஜிக்
+                // Dropdown-ல் கூட்டு வகுப்புகளை உடைத்து தனித்தனி வகுப்புகளாகக் காட்டுதல்
                 generatedWeeklyTimetable.forEach(slot => {
                     getIndividualClasses(slot.className).forEach(c => options.add(c));
                 });
@@ -138,7 +138,7 @@ window.generateGrid = function() {
     else if (mode === 'substitution') renderSubstituteSchedule();
 };
 
-// --- CORE TIMETABLE GENERATOR (Combined Classes + Smart Spread + 1st Period Lock) ---
+// --- CORE TIMETABLE GENERATOR (Idempotent & Multi-Class Aware) ---
 function generateAutoTimetable() {
     generatedWeeklyTimetable = []; 
     let teacherAvail = {};
@@ -147,6 +147,15 @@ function generateAutoTimetable() {
     let teacherSessionCount = {}; 
 
     if (!SCHOOL_CONFIG.assignments || SCHOOL_CONFIG.assignments.length === 0) return;
+
+    // 🌟 1. ABSOLUTE DETERMINISM FIX: அசைன்மென்ட்களை ஒரு நிலையான வரிசையில் வரிசைப்படுத்துதல்
+    SCHOOL_CONFIG.assignments.sort((a, b) => {
+        if (a.isClassTeacher !== b.isClassTeacher) return a.isClassTeacher ? -1 : 1;
+        let keyA = `${a.teacherName}-${a.className}-${a.subjectName}`;
+        let keyB = `${b.teacherName}-${b.className}-${b.subjectName}`;
+        return keyA.localeCompare(keyB);
+    });
+
     const teachingPeriods = SCHOOL_CONFIG.regularTimings.filter(p => p.type === 'class');
     const firstPeriod = teachingPeriods[0];
     
@@ -207,10 +216,11 @@ function generateAutoTimetable() {
                         if (!req.isClassTeacher && period.label === firstPeriod.label) continue; 
 
                         let timeKey = `${checkDay}-${period.label}`;
+                        
+                        // 🌟 ROBUST CHECK: கூட்டு வகுப்பில் ஏதேனும் ஒரு பிரிவு பிஸியாக இருந்தாலும் தடுத்தல்
                         let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
                         
                         if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
-                            
                             let countToday = dailySubjectCount[req.className]?.[checkDay]?.[req.subjectName] || 0;
                             if (countToday >= 2) continue; 
                             
@@ -234,6 +244,7 @@ function generateAutoTimetable() {
                             if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
                             teacherAvail[req.teacherName][timeKey] = true;
                             
+                            // கூட்டு வகுப்பின் அனைத்துப் பிரிவுகளையும் ஒரே நேரத்தில் லாக் செய்தல்
                             indClasses.forEach(cls => {
                                 if (!classAvail[cls]) classAvail[cls] = {};
                                 classAvail[cls][timeKey] = true;
@@ -285,10 +296,9 @@ function renderRegularTimetable() {
     teachingPeriods.forEach((p, index) => { html += `<th class="p-3 border border-blue-200"><div class="font-bold text-lg">${index + 1}</div></th>`; });
     html += `</tr></thead><tbody>`;
 
-    let displayData = generatedWeeklyTimetable;
-    
-    // 🌟 Combined Classes Support in UI Filter
+    let displayData = [];
     if (viewType === 'class') {
+        // 🌟 100% CONSISTENCY FIX: கூட்டு வகுப்பில் இருந்தாலும் அந்த வகுப்பு தனியாகத் தெரியும்
         displayData = generatedWeeklyTimetable.filter(d => getIndividualClasses(d.className).includes(filterVal));
     } else if (viewType === 'teacher') {
         displayData = generatedWeeklyTimetable.filter(d => d.teacherName.replace('⭐ ', '') === filterVal);
@@ -428,7 +438,7 @@ function renderExamSchedule() {
     html += `</div></div>`;
     mainGrid.innerHTML = html;
     if (window.lucide) window.lucide.createIcons();
-    updateStatus("Exam Schedule Loaded (Strict 1-Duty-Per-Day Applied)");
+    updateStatus("Exam Schedule Loaded");
 }
 
 // --- RENDER 3: SUBSTITUTION MANAGER ---
@@ -536,19 +546,6 @@ function renderSubstituteSchedule() {
     mainGrid.innerHTML = html;
     if (window.lucide) window.lucide.createIcons();
     updateStatus("Substitution Manager Loaded");
-}
-
-// --- CLOUD SYNC & HORIZONTAL PARSING ---
-function populateAbsentTeachersList() {
-    let allTeachers = [...new Set(SCHOOL_CONFIG.assignments.map(a => a.teacherName.replace('⭐ ', '')))].sort();
-    const listDiv = document.getElementById('absentTeachersList');
-    if(!listDiv) return;
-    
-    listDiv.innerHTML = allTeachers.map(t => 
-        `<label class="flex items-center gap-1 bg-white border border-gray-200 px-2 py-1 rounded cursor-pointer hover:bg-red-50 hover:border-red-300 transition-colors">
-            <input type="checkbox" class="absent-chk" value="${t}"> <span class="font-medium text-gray-700">${t}</span>
-        </label>`
-    ).join('');
 }
 
 window.syncFromCloud = async function() {
