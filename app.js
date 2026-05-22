@@ -6,10 +6,15 @@
 // ========================================================================
 // ⚙️ MASTER CONFIGURATION (Change only this block for other schools)
 // ========================================================================
+// app.js - Optimized Timetable Engine
 const APP_CONFIG = {
-    fullName: "GHSS VELAMURITHANPETTAI", 
-    shortName: "GHSS VELAMURITHANPETTAI",                                           
-    scriptUrl: "https://script.google.com/macros/s/AKfycbxhbfj-RiHOmidh0opQmct7W1x-HPXvV0szc1x5QcdbeNZ3BZYx_YvPqRqyrYmI7BzA/exec" 
+    fullName: "GHSS VELAMURITHANPETTAI",
+    shortName: "GHSS VMPT",
+    scriptUrl: "https://script.google.com/macros/s/AKfycbwWlI-5iHo-lXoIeaSeHLs-jeI5sFxviEBSsJ3PS4AQJEN8ReoCG9xwpYKGJvYcMDPh/exec"
+};
+
+// ... (இந்த இடத்தில் பழைய app.js-ல் உள்ள அனைத்து Functions-களையும் அப்படியே வைத்திருக்கவும்) ...
+// குறிப்பு: நீங்கள் காப்பி செய்யும்போது முழு கோப்பையும் (functions, variables) சரியாக பேஸ்ட் செய்துள்ளீர்களா என்று பார்க்கவும்.
 };
 const SCRIPT_URL = APP_CONFIG.scriptUrl;
 
