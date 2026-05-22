@@ -10,7 +10,7 @@
 const APP_CONFIG = {
     fullName: "GHSS VELAMURITHANPETTAI",
     shortName: "GHSS VMPT",
-    scriptUrl: "https://script.google.com/macros/s/AKfycbwWlI-5iHo-lXoIeaSeHLs-jeI5sFxviEBSsJ3PS4AQJEN8ReoCG9xwpYKGJvYcMDPh/exec"
+    scriptUrl: "https://script.google.com/macros/s/AKfycbxhbfj-RiHOmidh0opQmct7W1x-HPXvV0szc1x5QcdbeNZ3BZYx_YvPqRqyrYmI7BzA/exec"
 };
 
 // ... (இந்த இடத்தில் பழைய app.js-ல் உள்ள அனைத்து Functions-களையும் அப்படியே வைத்திருக்கவும்) ...
