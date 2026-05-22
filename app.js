@@ -152,8 +152,8 @@ function generateAutoTimetable() {
     generatedWeeklyTimetable = [];
     let teacherAvail = {};
     let classAvail = {};
-    let dailySubjectCount = {};
-    let teacherSessionCount = {};
+    let dailySubjectCount = {}; 
+    let teacherSessionCount = {}; 
 
     if (!SCHOOL_CONFIG.assignments || SCHOOL_CONFIG.assignments.length === 0) return;
 
@@ -166,48 +166,50 @@ function generateAutoTimetable() {
 
     const teachingPeriods = SCHOOL_CONFIG.regularTimings.filter(p => p.type === 'class');
     const firstPeriod = teachingPeriods[0];
-   
+    
     const fnPeriodLabels = teachingPeriods.slice(0, 4).map(p => p.label);
     const anPeriodLabels = teachingPeriods.slice(4, 8).map(p => p.label);
 
-    // Phase 1: Class Teachers Locked to Period 1
+    // Phase 1: Class Teachers Locked to Period 1 (unchanged)
     SCHOOL_CONFIG.assignments.forEach(req => {
-        req.assignedCount = 0;
+        req.assignedCount = 0; 
         if (req.isClassTeacher && firstPeriod) {
             let isFN = fnPeriodLabels.includes(firstPeriod.label);
             let sessionType = isFN ? 'FN' : 'AN';
-           
+            
             if (!isPartTimeTeacherAvailable(req.teacherName, sessionType)) return;
-           
+            
             let indClasses = getIndividualClasses(req.className);
+
             for (let day of daysOfWeek) {
                 let timeKey = `${day}-${firstPeriod.label}`;
                 let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
+
                 if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
                     generatedWeeklyTimetable.push({
                         day: day, period: firstPeriod.label, time: `${firstPeriod.start} - ${firstPeriod.end}`,
                         className: req.className, subjectName: req.subjectName, teacherName: `⭐ ${req.teacherName}`
                     });
-                   
+                    
                     if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
                     teacherAvail[req.teacherName][timeKey] = true;
-                   
+                    
                     indClasses.forEach(cls => {
                         if (!classAvail[cls]) classAvail[cls] = {};
                         classAvail[cls][timeKey] = true;
                     });
-                   
+                    
                     if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
                     if (!teacherSessionCount[req.teacherName][day]) teacherSessionCount[req.teacherName][day] = { FN: 0, AN: 0 };
                     if (isFN) teacherSessionCount[req.teacherName][day].FN++;
-                   
+                    
                     req.assignedCount++;
                 }
             }
         }
     });
 
-    // Phase 2: Distribute Remaining Periods (Max 2 same subject per day rule REMOVED)
+    // 🚀 IMPROVED Phase 2: More Aggressive Placement
     SCHOOL_CONFIG.assignments.forEach(req => {
         let remainingPeriods = req.periodsPerWeek - req.assignedCount;
         let indClasses = getIndividualClasses(req.className);
@@ -215,13 +217,21 @@ function generateAutoTimetable() {
         for (let i = 0; i < remainingPeriods; i++) {
             let placed = false;
             let preferredDayIndex = (i + req.assignedCount) % 5;
-            let attemptLimits = [true, false];
-           
-            for (let strictMode of attemptLimits) {
+
+            // More flexible strategies
+            const strategies = [
+                { strictSession: true,  maxPerDay: 8 },   // Normal
+                { strictSession: false, maxPerDay: 8 },   // Relax session limit
+                { strictSession: false, maxPerDay: 10 }   // Very relaxed (last attempt)
+            ];
+
+            for (let strategy of strategies) {
+                if (placed) break;
+
                 for (let d = 0; d < 5; d++) {
                     let checkDayIndex = (preferredDayIndex + d) % 5;
                     let checkDay = daysOfWeek[checkDayIndex];
-                   
+
                     for (let period of SCHOOL_CONFIG.regularTimings) {
                         if (period.type === 'break' || period.type === 'fixed') continue;
                         if (!req.isClassTeacher && period.label === firstPeriod.label) continue;
@@ -234,76 +244,83 @@ function generateAutoTimetable() {
 
                         let timeKey = `${checkDay}-${period.label}`;
                         let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
-                       
-                        if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
-                            // === MAX 2 SAME SUBJECT PER DAY RULE REMOVED ===
-                           
-                            if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
-                            if (!teacherSessionCount[req.teacherName][checkDay]) teacherSessionCount[req.teacherName][checkDay] = { FN: 0, AN: 0 };
-                            let counts = teacherSessionCount[req.teacherName][checkDay];
-                           
-                            if (strictMode) {
-                                if (isFN && counts.FN >= 3) continue;
-                                if (isAN && counts.AN >= 3) continue;
-                            }
-                           
-                            generatedWeeklyTimetable.push({
-                                day: checkDay, period: period.label, time: `${period.start} - ${period.end}`,
-                                className: req.className, subjectName: req.subjectName, teacherName: req.teacherName
-                            });
-                           
-                            if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
-                            teacherAvail[req.teacherName][timeKey] = true;
-                           
-                            indClasses.forEach(cls => {
-                                if (!classAvail[cls]) classAvail[cls] = {};
-                                classAvail[cls][timeKey] = true;
-                            });
 
-                            // Maintain counter (but no longer enforce limit)
-                            if (!dailySubjectCount[req.className]) dailySubjectCount[req.className] = {};
-                            if (!dailySubjectCount[req.className][checkDay]) dailySubjectCount[req.className][checkDay] = {};
-                            dailySubjectCount[req.className][checkDay][req.subjectName] = (dailySubjectCount[req.className][checkDay][req.subjectName] || 0) + 1;
-                           
-                            if (isFN) counts.FN++;
-                            if (isAN) counts.AN++;
-                           
-                            req.assignedCount++;
-                            placed = true;
-                            break;
+                        if (teacherAvail[req.teacherName]?.[timeKey] || isClassBusy) continue;
+
+                        // Session count check with relaxed limit
+                        if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
+                        if (!teacherSessionCount[req.teacherName][checkDay]) 
+                            teacherSessionCount[req.teacherName][checkDay] = { FN: 0, AN: 0 };
+                        
+                        let counts = teacherSessionCount[req.teacherName][checkDay];
+                        let totalToday = counts.FN + counts.AN;
+
+                        if (strategy.strictSession) {
+                            if (isFN && counts.FN >= 4) continue;
+                            if (isAN && counts.AN >= 4) continue;
                         }
+                        if (totalToday >= strategy.maxPerDay) continue;
+
+                        // === PLACE IT ===
+                        generatedWeeklyTimetable.push({
+                            day: checkDay, 
+                            period: period.label, 
+                            time: `${period.start} - ${period.end}`,
+                            className: req.className, 
+                            subjectName: req.subjectName, 
+                            teacherName: req.teacherName
+                        });
+
+                        if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
+                        teacherAvail[req.teacherName][timeKey] = true;
+
+                        indClasses.forEach(cls => {
+                            if (!classAvail[cls]) classAvail[cls] = {};
+                            classAvail[cls][timeKey] = true;
+                        });
+
+                        if (!dailySubjectCount[req.className]) dailySubjectCount[req.className] = {};
+                        if (!dailySubjectCount[req.className][checkDay]) dailySubjectCount[req.className][checkDay] = {};
+                        dailySubjectCount[req.className][checkDay][req.subjectName] = 
+                            (dailySubjectCount[req.className][checkDay][req.subjectName] || 0) + 1;
+
+                        if (isFN) counts.FN++;
+                        if (isAN) counts.AN++;
+
+                        req.assignedCount++;
+                        placed = true;
+                        break;
                     }
                     if (placed) break;
                 }
-                if (placed) break;
+            }
+
+            if (!placed) {
+                console.warn(`❌ Could NOT place: ${req.teacherName} - ${req.subjectName} (${req.className})`);
             }
         }
     });
 
-    // 📊 NEW: Generation Summary Report
+    // Summary
     console.log("📊 TIMETABLE GENERATION SUMMARY:");
-    let totalRequired = 0;
-    let totalPlaced = 0;
+    let totalRequired = 0, totalPlaced = 0;
     let summary = [];
 
     SCHOOL_CONFIG.assignments.forEach(req => {
         const required = req.periodsPerWeek;
-        const placed = req.assignedCount;
+        const placed = req.assignedCount || 0;
         totalRequired += required;
         totalPlaced += placed;
-       
-        const status = placed === required ? "✅" : (placed > 0 ? "⚠️" : "❌");
-        const teacherName = req.teacherName.replace('⭐ ', '');
-        summary.push(`${status} ${teacherName} - ${req.subjectName} (${req.className}): ${placed}/${required}`);
+        const status = placed === required ? "✅" : "⚠️";
+        summary.push(`${status} ${req.teacherName.replace('⭐ ','')} - ${req.subjectName} (${req.className}): ${placed}/${required}`);
     });
 
     summary.sort().forEach(line => console.log(line));
-    console.log(`\nTotal: ${totalPlaced}/${totalRequired} periods placed (${Math.round(totalPlaced/totalRequired*100)}%)`);
+    console.log(`\nTotal: ${totalPlaced}/${totalRequired} (${Math.round(totalPlaced/totalRequired*100)}%)`);
 
-    // Show summary on UI
     showGenerationSummary();
 }
-
+   
 // === NEW: UI Summary Panel Function ===
 function showGenerationSummary() {
     const panel = document.getElementById('summaryPanel');
