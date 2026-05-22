@@ -212,6 +212,7 @@ function generateAutoTimetable() {
     });
 
     // Phase 2: Distribute Remaining Periods
+        // Phase 2: Distribute Remaining Periods (Max 2 same subject per day rule REMOVED)
     SCHOOL_CONFIG.assignments.forEach(req => {
         let remainingPeriods = req.periodsPerWeek - req.assignedCount;
         let indClasses = getIndividualClasses(req.className);
@@ -241,8 +242,8 @@ function generateAutoTimetable() {
                         let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
                         
                         if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
-                            let countToday = dailySubjectCount[req.className]?.[checkDay]?.[req.subjectName] || 0;
-                            if (countToday >= 2) continue; 
+                            
+                            // === MAX 2 SAME SUBJECT PER DAY RULE REMOVED ===
                             
                             if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
                             if (!teacherSessionCount[req.teacherName][checkDay]) teacherSessionCount[req.teacherName][checkDay] = { FN: 0, AN: 0 };
@@ -266,9 +267,10 @@ function generateAutoTimetable() {
                                 classAvail[cls][timeKey] = true;
                             });
 
+                            // Maintain counter (but no longer enforce limit)
                             if (!dailySubjectCount[req.className]) dailySubjectCount[req.className] = {};
                             if (!dailySubjectCount[req.className][checkDay]) dailySubjectCount[req.className][checkDay] = {};
-                            dailySubjectCount[req.className][checkDay][req.subjectName] = countToday + 1;
+                            dailySubjectCount[req.className][checkDay][req.subjectName] = (dailySubjectCount[req.className][checkDay][req.subjectName] || 0) + 1;
                             
                             if (isFN) counts.FN++;
                             if (isAN) counts.AN++;
@@ -284,8 +286,25 @@ function generateAutoTimetable() {
             }
         }
     });
-}
+    // 📊 NEW: Generation Summary Report
+    console.log("📊 TIMETABLE GENERATION SUMMARY:");
+    let totalRequired = 0;
+    let totalPlaced = 0;
+    let summary = [];
 
+    SCHOOL_CONFIG.assignments.forEach(req => {
+        const required = req.periodsPerWeek;
+        const placed = req.assignedCount;
+        totalRequired += required;
+        totalPlaced += placed;
+        
+        const status = placed === required ? "✅" : (placed > 0 ? "⚠️" : "❌");
+        const teacherName = req.teacherName.replace('⭐ ', '');
+        summary.push(`${status} ${teacherName} - ${req.subjectName} (${req.className}): ${placed}/${required}`);
+    });
+
+    summary.sort().forEach(line => console.log(line));
+    console.log(`\nTotal: ${totalPlaced}/${totalRequired} periods placed (${Math.round(totalPlaced/totalRequired*100)}%)`);
 // --- RENDER 1: REGULAR TIMETABLE ---
 function renderRegularTimetable() {
     const mainGrid = document.getElementById('mainGrid');
