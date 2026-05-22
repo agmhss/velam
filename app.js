@@ -9,7 +9,7 @@
 const APP_CONFIG = {
     fullName: "GHSS VELAMURITHANPETTAI", 
     shortName: "GHSS VELAMURITHANPETTAI",                                           
-    scriptUrl: "https://script.google.com/macros/s/AKfycbwWlI-5iHo-lXoIeaSeHLs-jeI5sFxviEBSsJ3PS4AQJEN8ReoCG9xwpYKGJvYcMDPh/exec" 
+    scriptUrl: "https://script.google.com/macros/s/AKfycbxhbfj-RiHOmidh0opQmct7W1x-HPXvV0szc1x5QcdbeNZ3BZYx_YvPqRqyrYmI7BzA/exec" 
 };
 const SCRIPT_URL = APP_CONFIG.scriptUrl;
 
