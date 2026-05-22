@@ -246,7 +246,7 @@ function generateAutoTimetable() {
                         
                         if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
                             let countToday = dailySubjectCount[req.className]?.[checkDay]?.[req.subjectName] || 0;
-                            if (countToday >= 4) continue; 
+                            if (countToday >= 7) continue; 
                             
                             if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
                             if (!teacherSessionCount[req.teacherName][checkDay]) teacherSessionCount[req.teacherName][checkDay] = { FN: 0, AN: 0 };
