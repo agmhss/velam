@@ -147,71 +147,73 @@ window.generateGrid = function() {
     else if (mode === 'substitution') renderSubstituteSchedule();
 };
 
-// --- CORE TIMETABLE GENERATOR ---
+// --- CORE TIMETABLE GENERATOR (Aggressive Mode) ---
 function generateAutoTimetable() {
     generatedWeeklyTimetable = []; 
     let teacherAvail = {};
     let classAvail = {};
-    let dailySubjectCount = {}; 
-    let teacherSessionCount = {}; 
 
     if (!SCHOOL_CONFIG.assignments || SCHOOL_CONFIG.assignments.length === 0) return;
 
-    SCHOOL_CONFIG.assignments.sort((a, b) => {
-        if (a.isClassTeacher !== b.isClassTeacher) return a.isClassTeacher ? -1 : 1;
-        let keyA = `${a.teacherName}-${a.className}-${a.subjectName}`;
-        let keyB = `${b.teacherName}-${b.className}-${b.subjectName}`;
-        return keyA.localeCompare(keyB);
-    });
+    // 🌟 மிக முக்கியமான மாற்றம்: ஆசிரியரின் மொத்த பீரியட் சுமை (Load) அடிப்படையில் Sorting
+    // இது SM போன்றவர்களுக்கு முன்னுரிமை கொடுத்து முதலில் பீரியட்களை ஒதுக்கும்
+    SCHOOL_CONFIG.assignments.sort((a, b) => b.periodsPerWeek - a.periodsPerWeek);
 
     const teachingPeriods = SCHOOL_CONFIG.regularTimings.filter(p => p.type === 'class');
-    const firstPeriod = teachingPeriods[0];
-    
     const fnPeriodLabels = teachingPeriods.slice(0, 4).map(p => p.label);
-    const anPeriodLabels = teachingPeriods.slice(4, 8).map(p => p.label);
 
-    // Phase 1: Class Teachers Locked to Period 1
     SCHOOL_CONFIG.assignments.forEach(req => {
-        req.assignedCount = 0; 
-        if (req.isClassTeacher && firstPeriod) {
+        let indClasses = getIndividualClasses(req.className);
+        
+        // 🌟 ஆசிரியருக்குத் தேவைப்படும் அத்தனை பீரியட்களையும் ஒதுக்கும் வரை விடாது
+        for (let i = 0; i < req.periodsPerWeek; i++) {
+            let placed = false;
             
-            let isFN = fnPeriodLabels.includes(firstPeriod.label);
-            let sessionType = isFN ? 'FN' : 'AN';
-            
-            // 🌟 Global Part-Time Checker
-            if (!isPartTimeTeacherAvailable(req.teacherName, sessionType)) return;
-            
-            let indClasses = getIndividualClasses(req.className);
+            // Loop through every possible slot until placed
+            for (let d = 0; d < daysOfWeek.length; d++) {
+                let day = daysOfWeek[d];
+                
+                for (let period of teachingPeriods) {
+                    let isFN = fnPeriodLabels.includes(period.label);
+                    let sessionType = isFN ? 'FN' : 'AN';
 
-            for (let day of daysOfWeek) {
-                let timeKey = `${day}-${firstPeriod.label}`;
-                let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
+                    // Part-Time Teacher Rules
+                    if (!isPartTimeTeacherAvailable(req.teacherName, sessionType)) continue;
 
-                if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
-                    generatedWeeklyTimetable.push({
-                        day: day, period: firstPeriod.label, time: `${firstPeriod.start} - ${firstPeriod.end}`,
-                        className: req.className, subjectName: req.subjectName, teacherName: `⭐ ${req.teacherName}`
-                    });
+                    let timeKey = `${day}-${period.label}`;
                     
-                    if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
-                    teacherAvail[req.teacherName][timeKey] = true;
+                    // Clash detection: வகுப்பு காலியாக இருக்க வேண்டும், ஆசிரியரும் காலியாக இருக்க வேண்டும்
+                    let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
+                    let isTeacherBusy = teacherAvail[req.teacherName]?.[timeKey];
                     
-                    indClasses.forEach(cls => {
-                        if (!classAvail[cls]) classAvail[cls] = {};
-                        classAvail[cls][timeKey] = true;
-                    });
-                    
-                    if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
-                    if (!teacherSessionCount[req.teacherName][day]) teacherSessionCount[req.teacherName][day] = { FN: 0, AN: 0 };
-                    if (isFN) teacherSessionCount[req.teacherName][day].FN++;
-                    
-                    req.assignedCount++;
+                    if (!isTeacherBusy && !isClassBusy) {
+                        generatedWeeklyTimetable.push({
+                            day: day, period: period.label, time: `${period.start} - ${period.end}`,
+                            className: req.className, subjectName: req.subjectName, teacherName: req.teacherName
+                        });
+                        
+                        // Lock the slots
+                        if(!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
+                        teacherAvail[req.teacherName][timeKey] = true;
+                        
+                        indClasses.forEach(cls => {
+                            if(!classAvail[cls]) classAvail[cls] = {};
+                            classAvail[cls][timeKey] = true;
+                        });
+                        
+                        placed = true;
+                        break; 
+                    }
                 }
+                if (placed) break; 
+            }
+            if (!placed) {
+                console.error(`❌ Clash Detected: Could not allot period for ${req.teacherName} in ${req.className}`);
             }
         }
     });
-
-    // Phase 2: Distribute Remaining Periods
+}
+// Phase 2: Distribute Remaining Periods
     SCHOOL_CONFIG.assignments.forEach(req => {
         let remainingPeriods = req.periodsPerWeek - req.assignedCount;
         let indClasses = getIndividualClasses(req.className);
