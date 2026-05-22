@@ -6,6 +6,46 @@
 // ========================================================================
 // ⚙️ MASTER CONFIGURATION (Change only this block for other schools)
 // ========================================================================
+// TEMPORARY LOCAL DATA FOR TESTING (Remove after testing)
+const LOCAL_ASSIGNMENTS = [
+    // SM - ENGLISH (22 periods)
+    { teacherName: "SM", subjectName: "ENGLISH", className: "11-A&B", periodsPerWeek: 4, isClassTeacher: false },
+    { teacherName: "SM", subjectName: "ENGLISH", className: "11-C", periodsPerWeek: 4, isClassTeacher: false },
+    { teacherName: "SM", subjectName: "ENGLISH", className: "12-A&B", periodsPerWeek: 4, isClassTeacher: false },
+    { teacherName: "SM", subjectName: "ENGLISH", className: "12-C&D", periodsPerWeek: 4, isClassTeacher: false },
+    { teacherName: "SM", subjectName: "ENGLISH", className: "6-A", periodsPerWeek: 6, isClassTeacher: false },
+    
+    // Add other teachers similarly if needed...
+];
+
+window.syncFromCloud = async function() {
+    updateStatus("Loading Local Data...");
+    
+    SCHOOL_CONFIG.assignments = LOCAL_ASSIGNMENTS;
+    
+    window.teacherWorkload = {};
+    window.teacherMaxGrade = {};
+    window.teacherLevels = {};
+    window.teacherPartTimeStatus = {};
+
+    // Build workload and levels
+    SCHOOL_CONFIG.assignments.forEach(req => {
+        let t = req.teacherName;
+        window.teacherWorkload[t] = (window.teacherWorkload[t] || 0) + req.periodsPerWeek;
+        let gVal = getGradeValue(req.className);
+        window.teacherMaxGrade[t] = Math.max((window.teacherMaxGrade[t] || 0), gVal);
+    });
+
+    for (let t in window.teacherMaxGrade) {
+        window.teacherLevels[t] = getTeacherCategory(window.teacherMaxGrade[t]);
+        window.teacherPartTimeStatus[t] = 'FULL';
+    }
+
+    updateStatus("Generating Schedule...");
+    generateAutoTimetable(); 
+    populateAbsentTeachersList(); 
+    window.generateGrid(); 
+};
 const APP_CONFIG = {
     fullName: "GHSS VELAMURITHANPETTAI",
     shortName: "GHSS VELAMURITHANPETTAI",
