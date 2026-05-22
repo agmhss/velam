@@ -1,51 +1,10 @@
 /**
  * app.js - Advanced Timetable, Exam & Substitution Engine
- * Features: Absolute Determinism, Combined Class Splitter, Global Part-Time Tagging
  */
 
 // ========================================================================
-// ⚙️ MASTER CONFIGURATION (Change only this block for other schools)
+// MASTER CONFIGURATION + LOCAL TESTING DATA
 // ========================================================================
-// TEMPORARY LOCAL DATA FOR TESTING (Remove after testing)
-const LOCAL_ASSIGNMENTS = [
-    // SM - ENGLISH (22 periods)
-    { teacherName: "SM", subjectName: "ENGLISH", className: "11-A&B", periodsPerWeek: 4, isClassTeacher: false },
-    { teacherName: "SM", subjectName: "ENGLISH", className: "11-C", periodsPerWeek: 4, isClassTeacher: false },
-    { teacherName: "SM", subjectName: "ENGLISH", className: "12-A&B", periodsPerWeek: 4, isClassTeacher: false },
-    { teacherName: "SM", subjectName: "ENGLISH", className: "12-C&D", periodsPerWeek: 4, isClassTeacher: false },
-    { teacherName: "SM", subjectName: "ENGLISH", className: "6-A", periodsPerWeek: 6, isClassTeacher: false },
-    
-    // Add other teachers similarly if needed...
-];
-
-window.syncFromCloud = async function() {
-    updateStatus("Loading Local Data...");
-    
-    SCHOOL_CONFIG.assignments = LOCAL_ASSIGNMENTS;
-    
-    window.teacherWorkload = {};
-    window.teacherMaxGrade = {};
-    window.teacherLevels = {};
-    window.teacherPartTimeStatus = {};
-
-    // Build workload and levels
-    SCHOOL_CONFIG.assignments.forEach(req => {
-        let t = req.teacherName;
-        window.teacherWorkload[t] = (window.teacherWorkload[t] || 0) + req.periodsPerWeek;
-        let gVal = getGradeValue(req.className);
-        window.teacherMaxGrade[t] = Math.max((window.teacherMaxGrade[t] || 0), gVal);
-    });
-
-    for (let t in window.teacherMaxGrade) {
-        window.teacherLevels[t] = getTeacherCategory(window.teacherMaxGrade[t]);
-        window.teacherPartTimeStatus[t] = 'FULL';
-    }
-
-    updateStatus("Generating Schedule...");
-    generateAutoTimetable(); 
-    populateAbsentTeachersList(); 
-    window.generateGrid(); 
-};
 const APP_CONFIG = {
     fullName: "GHSS VELAMURITHANPETTAI",
     shortName: "GHSS VELAMURITHANPETTAI",
@@ -53,25 +12,49 @@ const APP_CONFIG = {
 };
 const SCRIPT_URL = APP_CONFIG.scriptUrl;
 
+// TEMPORARY LOCAL DATA FOR TESTING (SM + others)
+const LOCAL_ASSIGNMENTS = [
+    { teacherName: "SM", subjectName: "ENGLISH", className: "11-A&B", periodsPerWeek: 4, isClassTeacher: false },
+    { teacherName: "SM", subjectName: "ENGLISH", className: "11-C", periodsPerWeek: 4, isClassTeacher: false },
+    { teacherName: "SM", subjectName: "ENGLISH", className: "12-A&B", periodsPerWeek: 4, isClassTeacher: false },
+    { teacherName: "SM", subjectName: "ENGLISH", className: "12-C&D", periodsPerWeek: 4, isClassTeacher: false },
+    { teacherName: "SM", subjectName: "ENGLISH", className: "6-A", periodsPerWeek: 6, isClassTeacher: false },
+    // Add more teachers here if needed for full testing
+];
+
 // --- Global Trackers ---
 let generatedWeeklyTimetable = [];
 const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 let currentSession = 'FN';
+
 window.examDutyTracker = window.examDutyTracker || {};
 window.subDutyTracker = window.subDutyTracker || {};
 window.teacherWorkload = {};
 window.teacherLevels = {};
 window.teacherMaxGrade = {};
 window.dailyExamTracker = {};
-window.teacherPartTimeStatus = {}; // 🌟 NEW: ஆசிரியர்களின் நிரந்தர நேரக் கட்டுப்பாடு
+window.teacherPartTimeStatus = {};
 
-function updateStatus(msg) {
-    const indicator = document.getElementById('statusIndicator');
-    if (indicator) indicator.innerText = msg;
-}
+// SCHOOL_CONFIG (Required)
+const SCHOOL_CONFIG = {
+    regularTimings: [
+        { label: '1', start: '09:30', end: '10:10', type: 'class' },
+        { label: '2', start: '10:10', end: '10:50', type: 'class' },
+        { label: 'Break', start: '10:50', end: '11:00', type: 'break' },
+        { label: '3', start: '11:00', end: '11:40', type: 'class' },
+        { label: '4', start: '11:40', end: '12:20', type: 'class' },
+        { label: 'Lunch', start: '12:20', end: '13:00', type: 'break' },
+        { label: '5', start: '13:00', end: '13:40', type: 'class' },
+        { label: '6', start: '13:40', end: '14:20', type: 'class' },
+        { label: 'Break', start: '14:20', end: '14:30', type: 'break' },
+        { label: '7', start: '14:30', end: '15:10', type: 'class' },
+        { label: '8', start: '15:10', end: '15:50', type: 'class' }
+    ],
+    assignments: []
+};
 
 // =========================================================
-// 🌟 GLOBAL HELPERS
+// GLOBAL HELPERS
 // =========================================================
 function getGradeValue(clsStr) {
     let match = String(clsStr).toUpperCase().match(/^(\d+|LKG|UKG)/);
@@ -95,98 +78,51 @@ function getIndividualClasses(classNameStr) {
     return sections.map(sec => `${grade}-${sec.trim()}`);
 }
 
-// 🌟 NEW: Global Part-Time Availability Checker
 function isPartTimeTeacherAvailable(teacherName, sessionType) {
     let tName = String(teacherName).replace('⭐ ', '').trim();
     let status = window.teacherPartTimeStatus[tName] || 'FULL';
-   
     if (status === 'MORNING' && sessionType === 'AN') return false;
     if (status === 'AFTERNOON' && sessionType === 'FN') return false;
-   
     return true;
 }
 
-// --- UI EVENT LISTENERS & DYNAMIC UPDATES ---
-document.addEventListener('DOMContentLoaded', () => {
-    document.title = `${APP_CONFIG.shortName} - Timetable Engine`;
-    const headerDisplay = document.getElementById('schoolNameDisplay');
-    if(headerDisplay) headerDisplay.innerText = APP_CONFIG.fullName;
-
-    const viewType = document.getElementById('viewType');
-    const viewFilter = document.getElementById('viewFilter');
-    const opMode = document.getElementById('opMode');
-    const examGroup = document.getElementById('examPatternGroup');
-    const subGroup = document.getElementById('substituteGroup');
-    const dailyTools = document.getElementById('dailyToolsGroup');
-
-    const dateInput = document.getElementById('workDate');
-    if(dateInput) dateInput.valueAsDate = new Date();
-
-    if(opMode) {
-        opMode.addEventListener('change', (e) => {
-            if(examGroup) examGroup.classList.add('hidden');
-            if(subGroup) subGroup.classList.add('hidden');
-            if(dailyTools) dailyTools.classList.add('hidden');
-           
-            if (e.target.value === 'exam') {
-                if(examGroup) examGroup.classList.remove('hidden');
-                if(dailyTools) dailyTools.classList.remove('hidden');
-            }
-            if (e.target.value === 'substitution') {
-                if(subGroup) subGroup.classList.remove('hidden');
-                if(dailyTools) dailyTools.classList.remove('hidden');
-            }
-        });
-    }
-
-    if(viewType && viewFilter) {
-        viewType.addEventListener('change', (e) => {
-            viewFilter.innerHTML = '';
-            let options = new Set();
-            if (e.target.value === 'class') {
-                viewFilter.classList.remove('hidden');
-                generatedWeeklyTimetable.forEach(slot => {
-                    getIndividualClasses(slot.className).forEach(c => options.add(c));
-                });
-            } else if (e.target.value === 'teacher') {
-                viewFilter.classList.remove('hidden');
-                generatedWeeklyTimetable.forEach(slot => options.add(slot.teacherName.replace('⭐ ', '')));
-            } else {
-                viewFilter.classList.add('hidden');
-            }
-            Array.from(options).sort((a,b) => a.localeCompare(b, undefined, {numeric: true})).forEach(opt => {
-                viewFilter.innerHTML += `<option value="${opt}">${opt}</option>`;
-            });
-        });
-    }
-
-    const sessionBtns = document.querySelectorAll('#btnFN, #btnAN');
-    sessionBtns.forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            sessionBtns.forEach(b => b.classList.remove('bg-white', 'shadow-sm', 'text-blue-700', 'font-bold'));
-            sessionBtns.forEach(b => b.classList.add('text-gray-500', 'hover:bg-gray-200'));
-            e.target.classList.remove('text-gray-500', 'hover:bg-gray-200');
-            e.target.classList.add('bg-white', 'shadow-sm', 'text-blue-700', 'font-bold');
-            currentSession = e.target.id.replace('btn', '');
-            if (document.getElementById('opMode').value === 'exam') window.generateGrid();
-        });
-    });
-});
-
-function getSelectedDateStr() {
-    const dateVal = document.getElementById('workDate')?.value;
-    if (!dateVal) return "N/A";
-    const d = new Date(dateVal);
-    return `${d.getDate().toString().padStart(2, '0')}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getFullYear()}`;
+function updateStatus(msg) {
+    const indicator = document.getElementById('statusIndicator');
+    if (indicator) indicator.innerText = msg;
 }
 
-window.generateGrid = function() {
-    const mode = document.getElementById('opMode').value;
-    if (mode === 'regular') renderRegularTimetable();
-    else if (mode === 'exam') renderExamSchedule();
-    else if (mode === 'substitution') renderSubstituteSchedule();
+// --- LOCAL SYNC (Fixed) ---
+window.syncFromCloud = async function() {
+    updateStatus("Loading Local Test Data...");
+    
+    SCHOOL_CONFIG.assignments = LOCAL_ASSIGNMENTS;
+    
+    window.teacherWorkload = {};
+    window.teacherMaxGrade = {};
+    window.teacherLevels = {};
+    window.teacherPartTimeStatus = {};
+
+    SCHOOL_CONFIG.assignments.forEach(req => {
+        let t = req.teacherName;
+        window.teacherWorkload[t] = (window.teacherWorkload[t] || 0) + req.periodsPerWeek;
+        let gVal = getGradeValue(req.className);
+        window.teacherMaxGrade[t] = Math.max((window.teacherMaxGrade[t] || 0), gVal || 0);
+    });
+
+    for (let t in window.teacherMaxGrade) {
+        window.teacherLevels[t] = getTeacherCategory(window.teacherMaxGrade[t]);
+        window.teacherPartTimeStatus[t] = 'FULL';
+    }
+
+    updateStatus("Generating Schedule...");
+    generateAutoTimetable();
+    populateAbsentTeachersList();
+    window.generateGrid();
+    updateStatus("Local Data Loaded Successfully");
 };
 
+// Rest of your code (generateAutoTimetable, render functions, etc.) remains the same...
+// ... [Keep all the rest of your code from generateAutoTimetable onwards as it is] ...
 // --- CORE TIMETABLE GENERATOR ---
 function generateAutoTimetable() {
     generatedWeeklyTimetable = [];
