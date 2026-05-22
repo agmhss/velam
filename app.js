@@ -170,7 +170,7 @@ function generateAutoTimetable() {
     const fnPeriodLabels = teachingPeriods.slice(0, 4).map(p => p.label);
     const anPeriodLabels = teachingPeriods.slice(4, 8).map(p => p.label);
 
-    // Phase 1: Class Teachers Locked to Period 1 (unchanged)
+    // Phase 1: Class Teachers Locked to Period 1
     SCHOOL_CONFIG.assignments.forEach(req => {
         req.assignedCount = 0; 
         if (req.isClassTeacher && firstPeriod) {
@@ -209,7 +209,7 @@ function generateAutoTimetable() {
         }
     });
 
-    // 🚀 IMPROVED Phase 2: More Aggressive Placement
+    // 🔥 ULTRA AGGRESSIVE Phase 2
     SCHOOL_CONFIG.assignments.forEach(req => {
         let remainingPeriods = req.periodsPerWeek - req.assignedCount;
         let indClasses = getIndividualClasses(req.className);
@@ -218,14 +218,15 @@ function generateAutoTimetable() {
             let placed = false;
             let preferredDayIndex = (i + req.assignedCount) % 5;
 
-            // More flexible strategies
+            // Multiple passes with increasing relaxation
             const strategies = [
-                { strictSession: true,  maxPerDay: 8 },   // Normal
-                { strictSession: false, maxPerDay: 8 },   // Relax session limit
-                { strictSession: false, maxPerDay: 10 }   // Very relaxed (last attempt)
+                { maxFN: 4, maxAN: 4, maxTotalPerDay: 8 },
+                { maxFN: 5, maxAN: 5, maxTotalPerDay: 8 },
+                { maxFN: 6, maxAN: 6, maxTotalPerDay: 10 },
+                { maxFN: 8, maxAN: 8, maxTotalPerDay: 12 }   // Almost no limit on last pass
             ];
 
-            for (let strategy of strategies) {
+            for (let strat of strategies) {
                 if (placed) break;
 
                 for (let d = 0; d < 5; d++) {
@@ -247,7 +248,7 @@ function generateAutoTimetable() {
 
                         if (teacherAvail[req.teacherName]?.[timeKey] || isClassBusy) continue;
 
-                        // Session count check with relaxed limit
+                        // Check session limits
                         if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
                         if (!teacherSessionCount[req.teacherName][checkDay]) 
                             teacherSessionCount[req.teacherName][checkDay] = { FN: 0, AN: 0 };
@@ -255,11 +256,9 @@ function generateAutoTimetable() {
                         let counts = teacherSessionCount[req.teacherName][checkDay];
                         let totalToday = counts.FN + counts.AN;
 
-                        if (strategy.strictSession) {
-                            if (isFN && counts.FN >= 4) continue;
-                            if (isAN && counts.AN >= 4) continue;
-                        }
-                        if (totalToday >= strategy.maxPerDay) continue;
+                        if (isFN && counts.FN >= strat.maxFN) continue;
+                        if (isAN && counts.AN >= strat.maxAN) continue;
+                        if (totalToday >= strat.maxTotalPerDay) continue;
 
                         // === PLACE IT ===
                         generatedWeeklyTimetable.push({
@@ -296,7 +295,7 @@ function generateAutoTimetable() {
             }
 
             if (!placed) {
-                console.warn(`❌ Could NOT place: ${req.teacherName} - ${req.subjectName} (${req.className})`);
+                console.warn(`❌ FAILED to place: ${req.teacherName} - ${req.subjectName} (${req.className})`);
             }
         }
     });
@@ -312,7 +311,7 @@ function generateAutoTimetable() {
         totalRequired += required;
         totalPlaced += placed;
         const status = placed === required ? "✅" : "⚠️";
-        summary.push(`${status} ${req.teacherName.replace('⭐ ','')} - ${req.subjectName} (${req.className}): ${placed}/${required}`);
+        summary.push(`${status} ${req.teacherName.replace('⭐ ','')} (${req.className}) - ${req.subjectName}: ${placed}/${required}`);
     });
 
     summary.sort().forEach(line => console.log(line));
@@ -320,7 +319,7 @@ function generateAutoTimetable() {
 
     showGenerationSummary();
 }
-   
+
 // === NEW: UI Summary Panel Function ===
 function showGenerationSummary() {
     const panel = document.getElementById('summaryPanel');
