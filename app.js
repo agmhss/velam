@@ -157,11 +157,10 @@ function generateAutoTimetable() {
 
     if (!SCHOOL_CONFIG.assignments || SCHOOL_CONFIG.assignments.length === 0) return;
 
+    // Sort - Class teachers first
     SCHOOL_CONFIG.assignments.sort((a, b) => {
         if (a.isClassTeacher !== b.isClassTeacher) return a.isClassTeacher ? -1 : 1;
-        let keyA = `${a.teacherName}-${a.className}-${a.subjectName}`;
-        let keyB = `${b.teacherName}-${b.className}-${b.subjectName}`;
-        return keyA.localeCompare(keyB);
+        return (b.periodsPerWeek - a.periodsPerWeek); // High load first
     });
 
     const teachingPeriods = SCHOOL_CONFIG.regularTimings.filter(p => p.type === 'class');
@@ -170,7 +169,7 @@ function generateAutoTimetable() {
     const fnPeriodLabels = teachingPeriods.slice(0, 4).map(p => p.label);
     const anPeriodLabels = teachingPeriods.slice(4, 8).map(p => p.label);
 
-    // Phase 1: Class Teachers (unchanged)
+    // Phase 1: Class Teachers
     SCHOOL_CONFIG.assignments.forEach(req => {
         req.assignedCount = 0; 
         if (req.isClassTeacher && firstPeriod) {
@@ -187,20 +186,20 @@ function generateAutoTimetable() {
 
                 if (!teacherAvail[req.teacherName]?.[timeKey] && !isClassBusy) {
                     generatedWeeklyTimetable.push({
-                        day: day, period: firstPeriod.label, time: `${firstPeriod.start} - ${firstPeriod.end}`,
+                        day, period: firstPeriod.label, time: `${firstPeriod.start} - ${firstPeriod.end}`,
                         className: req.className, subjectName: req.subjectName, teacherName: `⭐ ${req.teacherName}`
                     });
                     
-                    if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
+                    teacherAvail[req.teacherName] = teacherAvail[req.teacherName] || {};
                     teacherAvail[req.teacherName][timeKey] = true;
                     
                     indClasses.forEach(cls => {
-                        if (!classAvail[cls]) classAvail[cls] = {};
+                        classAvail[cls] = classAvail[cls] || {};
                         classAvail[cls][timeKey] = true;
                     });
                     
-                    if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
-                    if (!teacherSessionCount[req.teacherName][day]) teacherSessionCount[req.teacherName][day] = { FN: 0, AN: 0 };
+                    teacherSessionCount[req.teacherName] = teacherSessionCount[req.teacherName] || {};
+                    teacherSessionCount[req.teacherName][day] = teacherSessionCount[req.teacherName][day] || { FN: 0, AN: 0 };
                     if (isFN) teacherSessionCount[req.teacherName][day].FN++;
                     
                     req.assignedCount++;
@@ -209,88 +208,72 @@ function generateAutoTimetable() {
         }
     });
 
-    // 🔥 MAXIMUM AGGRESSIVE Phase 2 - For high load teachers like SM
+    // 🔥 EXTREME GREEDY Phase 2 - For SM and high load teachers
     SCHOOL_CONFIG.assignments.forEach(req => {
-        let remainingPeriods = req.periodsPerWeek - req.assignedCount;
+        let remaining = req.periodsPerWeek - req.assignedCount;
+        if (remaining <= 0) return;
+
         let indClasses = getIndividualClasses(req.className);
 
-        for (let i = 0; i < remainingPeriods; i++) {
+        for (let i = 0; i < remaining; i++) {
             let placed = false;
-            let preferredDayIndex = (i + req.assignedCount) % 5;
 
-            for (let attempt = 0; attempt < 4 && !placed; attempt++) {
-                for (let d = 0; d < 5 && !placed; d++) {
-                    let checkDayIndex = (preferredDayIndex + d) % 5;
-                    let checkDay = daysOfWeek[checkDayIndex];
+            for (let day of daysOfWeek) {
+                for (let period of SCHOOL_CONFIG.regularTimings) {
+                    if (period.type === 'break' || period.type === 'fixed') continue;
+                    if (!req.isClassTeacher && period.label === firstPeriod.label) continue;
 
-                    for (let period of SCHOOL_CONFIG.regularTimings) {
-                        if (period.type === 'break' || period.type === 'fixed') continue;
-                        if (!req.isClassTeacher && period.label === firstPeriod.label) continue;
+                    let isFN = fnPeriodLabels.includes(period.label);
+                    let sessionType = isFN ? 'FN' : 'AN';
 
-                        let isFN = fnPeriodLabels.includes(period.label);
-                        let isAN = anPeriodLabels.includes(period.label);
-                        let sessionType = isFN ? 'FN' : 'AN';
+                    if (!isPartTimeTeacherAvailable(req.teacherName, sessionType)) continue;
 
-                        if (!isPartTimeTeacherAvailable(req.teacherName, sessionType)) continue;
+                    let timeKey = `${day}-${period.label}`;
+                    let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
 
-                        let timeKey = `${checkDay}-${period.label}`;
-                        let isClassBusy = indClasses.some(cls => classAvail[cls]?.[timeKey]);
+                    if (teacherAvail[req.teacherName]?.[timeKey] || isClassBusy) continue;
 
-                        if (teacherAvail[req.teacherName]?.[timeKey] || isClassBusy) continue;
+                    // Almost no restrictions in final pass
+                    if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
+                    if (!teacherSessionCount[req.teacherName][day]) teacherSessionCount[req.teacherName][day] = { FN: 0, AN: 0 };
+                    let counts = teacherSessionCount[req.teacherName][day];
 
-                        // Very relaxed limits for high-load teachers
-                        if (!teacherSessionCount[req.teacherName]) teacherSessionCount[req.teacherName] = {};
-                        if (!teacherSessionCount[req.teacherName][checkDay]) 
-                            teacherSessionCount[req.teacherName][checkDay] = { FN: 0, AN: 0 };
-                        
-                        let counts = teacherSessionCount[req.teacherName][checkDay];
-                        let totalToday = counts.FN + counts.AN;
+                    // Very high limits
+                    if (counts.FN + counts.AN >= 12) continue;
+                    if (isFN && counts.FN >= 7) continue;
+                    if (isAN && counts.AN >= 7) continue;
 
-                        if (totalToday >= 10) continue;           // Allow up to 10 periods per day
-                        if (isFN && counts.FN >= 6) continue;    // Allow 6 in FN
-                        if (isAN && counts.AN >= 6) continue;    // Allow 6 in AN
+                    // === FORCE PLACE ===
+                    generatedWeeklyTimetable.push({
+                        day, period: period.label, time: `${period.start} - ${period.end}`,
+                        className: req.className, subjectName: req.subjectName, teacherName: req.teacherName
+                    });
 
-                        // === FORCE PLACE ===
-                        generatedWeeklyTimetable.push({
-                            day: checkDay, 
-                            period: period.label, 
-                            time: `${period.start} - ${period.end}`,
-                            className: req.className, 
-                            subjectName: req.subjectName, 
-                            teacherName: req.teacherName
-                        });
+                    teacherAvail[req.teacherName] = teacherAvail[req.teacherName] || {};
+                    teacherAvail[req.teacherName][timeKey] = true;
 
-                        if (!teacherAvail[req.teacherName]) teacherAvail[req.teacherName] = {};
-                        teacherAvail[req.teacherName][timeKey] = true;
+                    indClasses.forEach(cls => {
+                        classAvail[cls] = classAvail[cls] || {};
+                        classAvail[cls][timeKey] = true;
+                    });
 
-                        indClasses.forEach(cls => {
-                            if (!classAvail[cls]) classAvail[cls] = {};
-                            classAvail[cls][timeKey] = true;
-                        });
+                    counts.FN += isFN ? 1 : 0;
+                    counts.AN += isAN ? 1 : 0;
 
-                        if (!dailySubjectCount[req.className]) dailySubjectCount[req.className] = {};
-                        if (!dailySubjectCount[req.className][checkDay]) dailySubjectCount[req.className][checkDay] = {};
-                        dailySubjectCount[req.className][checkDay][req.subjectName] = 
-                            (dailySubjectCount[req.className][checkDay][req.subjectName] || 0) + 1;
-
-                        if (isFN) counts.FN++;
-                        if (isAN) counts.AN++;
-
-                        req.assignedCount++;
-                        placed = true;
-                        break;
-                    }
+                    req.assignedCount++;
+                    placed = true;
+                    break;
                 }
+                if (placed) break;
             }
 
             if (!placed) {
-                console.warn(`❌ COULD NOT PLACE: ${req.teacherName} - ${req.subjectName} (${req.className})`);
+                console.warn(`❌ FAILED: ${req.teacherName} - ${req.subjectName} (${req.className})`);
             }
         }
     });
 
     // Summary
-    console.log("📊 TIMETABLE GENERATION SUMMARY:");
     let totalRequired = 0, totalPlaced = 0;
     let summary = [];
 
